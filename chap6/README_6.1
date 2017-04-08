@@ -1,0 +1,90 @@
+====== 第六章字符设备的驱动 ======
+
+6.1 Linux 字符设备驱动结构
+==========================
+
+-----------------
+6.1.1 cdev 结构体
+-----------------
+
+struct cdev {
+	struct kobject kobj;		//内嵌的kobject对象
+	struct module *owner;		//所属模块
+	struct file_operations *ops;		//文件操作结构体
+	struct list_head list;		//链表
+	dev_t dev;		//设备号
+	unsigned int count;		//
+}
+
+dev_t: 12位为主设备号，20位为次设备号
+
+MAJOR(dev_t dev) //获得主设备号
+MINOR(dev_t dev) //获得次设备号
+
+MKDEV(int major, int minor) //通过主设备号和次设备号，获得设备号
+
+API FOR cdev (fs/char_dev.c)
+----------------------------
+
+void cdev_init(struct cdev *, struct file_operations *);
+--------------------------------------------------------
+
+//cdev_init 用于初始化cdev的成员，并建立cdev 和 file_operations之间的链接
+void cdev_init(struct cdev *cdev, struct file_operations *fops)
+{
+	memset(cdev, 0, sizeof *cdev);
+	INIT_LIST_HEAD(&cdev->list);
+	kobject_init(&cdev->kobj, &ktype_cdev_default);
+	cdev->ops = fops;		//将传入的文件操作结构体指针赋值给cdev的ops
+}
+
+struct cdev *cdev_alloc(void);
+------------------------------
+
+//cdev_alloc用于动态申请一个cdev内存
+struct cdev *cdev_alloc(void)
+{
+	struct cdev *p = kzalloc(sizeof(struct cdev), GFP_KERNEL);
+	if (p) {
+		INIT_LIST_HEAD(&p->list);
+		kobject_init(&p->kobj, &ktype_cdev_dynamic);
+	}
+	return p;
+}
+
+void cdev_put(struct cdev *p);
+------------------------------
+
+int cdev_add(struct cdev *, dev_t, unsigned);
+---------------------------------------------
+//实现字符设备的注册，通常用在字符设备驱动模块的加载函数中
+
+
+void cdev_del(struct cdev *);
+-----------------------------
+//实现字符设备的注销，通常用在字符设备驱动模块的卸载函数中
+
+----------------------
+6.1.2 分配和释放设备号
+----------------------
+
+在调用cdev_add()函数进行注册字符设备前，需要向系统申请设备号
+
+int register_chrdev_region(dev_t from, unsigned count, const char *name);
+-------------------------------------------------------------------------
+//register_chrdev_region用于已知起始设备的设备号的情况下
+
+int alloc_chrdev_region(dev_t *dev, unsigned baseminor, unsigned count, const char *name);
+------------------------------------------------------------------------------------------
+//alloc_chrdev_region用于设备号未知，向系统动态申请未被占用的设备号
+
+在调用cdev_del()函数进行注销字符设备后，需要向系统释放先前申请的设备号
+void unregister_chrdev_region(dev_t from, unsigned count);
+
+----------------------------
+6.1.3 file_operations 结构体
+----------------------------
+
+file_operations 结构体中的成员函数是字符设备驱动程序设计的主体内容，
+这些函数实际会在应用程序进行linux的open(),read(), write(), close()
+等系统调用时最终被内核调用。
