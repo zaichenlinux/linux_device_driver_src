@@ -88,3 +88,150 @@ void unregister_chrdev_region(dev_t from, unsigned count);
 file_operations 结构体中的成员函数是字符设备驱动程序设计的主体内容，
 这些函数实际会在应用程序进行linux的open(),read(), write(), close()
 等系统调用时最终被内核调用。
+
+----------------------------------
+file_operations结构体主要结构成员
+---------------------------------
+
+llseek()
+read()
+write()
+open()
+
+unlocked_ioctl()
+----------------
+//提供设备相关控制命令的实现（既不是读也不是写操作）与用户空间的int fcntl()
+//和int ioctl()对应
+
+int (*mmap)(struct file *, struct vm_area_struct *);
+----------------------------------------------------
+//mmap()函数将设备内存映射到进程的虚拟地址空间中，这个函数对帧缓冲等设备特别有意义
+//帧缓冲被映射到用户空间后，应用程序可以直接访问它而无需在·内核和应用间进行内存
+//复制，它与用户空间的应用程序
+//void *mmap(void *addr, size_t length, int prot, int flags, int fd,
+//off_t offset)函数对应
+
+unsigned int (*poll)(struct file *, struct poll_table_struct *);
+----------------------------------------------------------------
+//一般用于询问设备是否可被非阻塞地立即读写。当询问的条件未触发时用户空间进行
+//select()和poll()系统调用时将引起进程的阻塞。
+
+未完待续......
+
+
+-------------------------------
+6.1.4 Linux 字符设备驱动的组成
+-------------------------------
+
+在linux中，字符设备的驱动由如下几个部分组成:
+--------------------------------------------
+
+1. 字符设备驱动模块加载与卸载函数
+----------------------------------
+
+//在字符设备的 加载函数中要实现字符设备cdev的注册，设备号的申请
+//             卸载函数中要实现字符设备的注销，设备号的释放
+
+------------------------------------------------------------
+         字符设备驱动模块加载与卸载函数模板
+------------------------------------------------------------
+/* 设备结构体 */
+struct xxx_dev_t {
+	struct cdev cdev;
+	...
+} xxx_dev;
+
+/* 设备驱动模块加载函数 */
+static int __init xxx_init(void)
+{
+	...
+	cdev_init(&xxx_dev.cdev, &xxx_fops);
+	xxx_dev.cdev.owner = THIS_MODULE;
+	/* 获取字符设备号 */
+	if (xxx_major)  {
+		register_chrdev_region(xxx_dev_no, 1, DEV_NAME);
+	} else {
+		alloc_chrdev_region(&xxx_dev_no, 0, 1, DEV_NAME);
+	}
+
+	ret = cdev_add(&xxx_dev.cdev, xxx_dev_no, 1);//注册设备
+	...
+
+}
+
+/* 设备驱动模块卸载函数 */
+static void __exit xxx_exit(void)
+{
+	unregister_chrdev_region(xxx_dev_no, 1);//释放占用的设备号
+	cdev_del(&xxx_dev.cdev);//注销设备
+	...
+
+}
+
+2.字符设备驱动的 file_operations 结构体中的成员函数
+---------------------------------------------------
+
+//file_operations 结构体中的成员函数是字符设备驱动与内核虚拟文件系统的接口
+//是用户空间对linux进行系统调用最终的落实者。
+
+-----------------------------------------------------
+      字符设备驱动读写 I/O 控制函数模板
+-----------------------------------------------------
+
+/* 读设备 */
+ssize_t xxx_read(struct file *filp, char __user *buf, size_t count,
+		loff_t *f_pos)
+{
+	...
+	copy_to_user(buf, ..., ...);
+	...
+}
+
+/* 写设备 */
+ssize_t xxx_write(struct file *filp, const char __user *buf, size_t count,
+		loff_t *f_pos)
+{
+	...
+	copy_from_user(..., buf, ...);
+	...
+}
+
+/* ioctl 函数 */
+long xxx_ioctl(struct file *filp, unsigned cmd, unsigned long arg)
+{
+	...
+	switch (cmd) {
+	case xxx_CMD1:
+		...
+		break;
+	case xxx_CMD2:
+		...
+		break;
+	default:
+		...
+	}
+
+	return 0;
+}
+
+由于用户空间不能直接访问内核空间的内存，借助了copy_from_user()完成用户空间缓冲区
+到内核空间的复制，
+copy_to_user()完成内核空间到用户空间缓冲区的复制。
+
+unsigned long copy_from_user(void *to, const void __user *from, unsigned long count);
+-------------------------------------------------------------------------------------
+//函数返回不能复制的字节数，如果完全复制成功返回为0,如果失败返回为一个负值。
+
+unsigned long copy_to_user(void __user *to, const void *from, unsigned long count);
+-----------------------------------------------------------------------------------
+
+如果要复制的内存是简单的类型，如int  char long,则可以用简单的put_user() 和 get_user()
+int val; //内核空间整形变量
+...
+get_user(val, (int *)arg); //用户到内核 arg是用户空间的地址
+...
+put_user(val, (int *)arg); //内核到用户 arg是用户空间的地址
+
+I/O 控制函数的cmd 参数为事先定义的I/O控制命令，而arg 为对应于该命令的参数。
+例如对于串行设备，如果SET_BAUDRATE是一个设置波特率的命令，那后面的arg参数
+就是波特率的值。
